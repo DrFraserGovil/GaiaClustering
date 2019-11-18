@@ -258,7 +258,7 @@ int totalLinesInFile = 0;
 
 std::string getReadFile(int argc, char** argv)
 {
-	std::string fileName = "gaia_t_maps_1024.csv";
+	std::string fileName = "gaia_t_maps_128.csv";
 	if (argc > 1)
 	{
 		fileName = argv[1];
