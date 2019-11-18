@@ -15,7 +15,7 @@
 
 const double deltaTMax = 4;
 const unsigned int maxClusters = 22;
-const unsigned int nThreads = 11;
+unsigned int nThreads = 2;
 const double arrayInit = -1;
 
 using Array4D = std::vector<std::vector<std::vector<std::vector<double>>>>;
@@ -254,31 +254,42 @@ void blockProcess(std::vector<std::string> blocks,std::string * saveBlock, int n
 	
 	threadActive[threadID] = false;
 }
+int totalLinesInFile = 0;
+
+std::string getReadFile(int argc, char** argv)
+{
+	std::string fileName = "gaia_t_maps_1024.csv";
+	if (argc > 1)
+	{
+		fileName = argv[1];
+		std::cout << "Using provided " << fileName << " as processing target" <<std::endl;
+	}
+	
+	std::ifstream testFile(fileName);
+	if (!testFile.is_open())
+	{
+		std::cout << "\n\nERROR: Could not find datafile. Something terrible has occured.\n\n" << std::endl;
+		exit(-1);
+	}
+	std::string rawLine;	
+	while (getline(testFile,rawLine))
+	{
+		++totalLinesInFile;
+	}
+	testFile.close();
+	std::cout << "A file with " << totalLinesInFile << " lines has been detected. Beginning analysis.\n\n" <<std::endl;
+	return fileName;	
+}
 
 int main(int argc, char** argv)
 {
 	auto start = std::chrono::high_resolution_clock::now();
 
+
+	// extract filename from input args
+	std::string fileName = getReadFile(argc, argv);
 	
-	int totalLines = 0;
-	std::string fileName = "gaia_t_maps_1024.csv";
-	if (argc > 1)
-	{
-		fileName = argv[1];
-	}
-	std::ifstream testFile(fileName);
-	if (!testFile.is_open())
-	{
-		std::cout << "\n\nERROR: Could not find datafile. Something terrible has occured.\n\n" << std::endl;
-		return -1;
-	}
-	std::string rawLine;	
-	while (getline(testFile,rawLine))
-	{
-		++totalLines;
-	}
-	testFile.close();
-	std::cout << "A file with " << totalLines << " lines has been detected. Beginning analysis.\n\n" <<std::endl;
+	
 	std::ifstream dataFile(fileName);
 
 	std::string saveFileName = "ClusteringDistribution.dat";
@@ -286,12 +297,21 @@ int main(int argc, char** argv)
 	{
 		saveFileName = argv[2];
 	}
+	
+
+	
 	std::ofstream saveFile;
 	saveFile.open(saveFileName);
 	
+
+	if (argc > 3)
+	{
+		nThreads = std::stoi(argv[3]);
+	}
 	
-	std::thread persei[nThreads];
+	std::vector<std::thread> persei(nThreads);
 	int currentThread = 0;
+	std::string rawLine;
 	int blockSize = 3000;
 	int currentOffset = 0;
 	bool noThreadAssigned = false;
@@ -336,9 +356,9 @@ int main(int argc, char** argv)
 			//std::cout << "Thread launched at line " << count  << "/" << totalLines << std::endl;
 		}
 		++count;
-		if (count % (totalLines / 200) == 0)
+		if (count % (totalLinesInFile / 200) == 0)
 		{
-			printTimeSince(start,count,totalLines);
+			printTimeSince(start,count,totalLinesInFile);
 		}
 	}
 	
@@ -364,6 +384,6 @@ int main(int argc, char** argv)
 	std::string sortcommand = "sort " + saveFileName + "  --field-separator=',' >> sorted_" + saveFileName; 
 	system(sortcommand.c_str());
 	
-	printTimeSince(start,count,totalLines);
+	printTimeSince(start,count,totalLinesInFile);
 	return 0;	
 }
