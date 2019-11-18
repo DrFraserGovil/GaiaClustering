@@ -39,6 +39,69 @@ std::vector<std::string> split(const std::string& s, char delimiter)
 	return tokens;
 }
 
+
+
+void countClusters(std::vector<double> data, std::vector<int> triggers, std::vector<std::vector<int>> & array)
+{
+	std::vector<double> subData;
+	for (int i = 0; i < triggers.size(); ++i)
+	{
+		if (triggers[i] == 1)
+		{
+			subData.push_back(data[i]);
+		}
+	}
+	int k = subData.size();
+
+	int m = 1;
+	if (k > 0)
+	{
+		for (int i = 1; i < subData.size(); ++i)
+		{
+			if (subData[i] - subData[i- 1] > deltaTMax)
+			{
+				++m;
+			}
+		}
+	}
+	else
+	{
+		m = 0;
+	}
+	
+	array[m][k] +=1;
+}
+
+void trueRecurse(std::vector<double> data, std::vector<int> triggers, std::vector<std::vector<int>> & array, int depth)
+{
+	if (depth < triggers.size())
+	{
+		triggers[depth] =0;
+		trueRecurse(data,triggers,array,depth + 1);
+		
+		triggers[depth] = 1;
+		trueRecurse(data,triggers,array,depth+1);
+	}
+	else
+	{
+		countClusters(data,triggers,array);
+	}
+}
+
+void trueCounter(std::vector<double> data, std::vector<std::vector<int>> & array)
+{
+	
+	
+	std::vector<int> triggers (data.size(), 0);
+
+	trueRecurse(data,triggers,array,0);
+	
+}
+
+
+
+
+
 class ClusterSolver
 {
 	std::vector<double> data;
@@ -102,7 +165,7 @@ class ClusterSolver
 	ClusterSolver(std::vector<double> input) : data(input)
 	{
 		N = data.size();
-		int truncMax = std::min(N+1,5);
+		int truncMax = std::min(N+1,(int)maxClusters);
 		
 		cache.resize(truncMax+1);
 		for (int m = 0; m <= truncMax; ++m)
@@ -120,20 +183,13 @@ class ClusterSolver
 	}
 	
 	
-	double P(int k)
+	double P(int m, int k)
 	{
-		//std::cout << "P has been called for k = " << k << std::endl;
-		double sum = 0;
-		for (int m = 0; m < 6; ++m)
-		{
-			sum += recursiveDive(m,k,0,0);
-		}
-		//std::cout << "P has finished" <<std::endl;
-		return sum;
+		return recursiveDive(m,k,0,0);
 	}
 };
 
-void processLine(int lineID, std::string input, std::string * saver)
+void processLine(int lineID, std::string input, std::string * saver,std::string * saverTrue)
 {
 	const int dataOffset = 2;
 	std::vector<std::string> line = split(input, ',');
@@ -151,30 +207,35 @@ void processLine(int lineID, std::string input, std::string * saver)
 	{
 		id = "0" + id;
 	}
-	saver->append(id);
+	//saver->append(id);
 	
-	if (N <= 6)
+
+	ClusterSolver solver(data);
+	
+	std::vector<std::vector<int>> trueArray(data.size()+1, std::vector<int>(data.size()+1,0));
+	trueCounter(data,trueArray);
+
+	for (int k = 0; k <= N; ++k)
 	{
-		for (int i = 0; i < N;++i)
+		int sum = 0;
+		saver->append(id + ", " + std::to_string(k) );
+
+		for (int m = 0; m < std::min(N,(int)maxClusters)+1;++m)
 		{
-			saver->append(", 1.0");
+			sum += trueArray[m][k];
+			
 		}
-	}
-	else
-	{
-		for (int i = 0; i < 6;++i)
+		for (int m = 0; m < std::min(N,(int)maxClusters)+1;++m)
 		{
-			saver->append(", 1.0");
+		double delta =(solver.P(m, N-k) - (float)trueArray[m][k]/sum)*1000000;
+		saver->append(", "  + std::to_string(delta));
 		}
 		
-		ClusterSolver solver(data);
-		for (int k = 6; k<=N;++k)
-		{
-			double pSum = solver.P(N - k);
-			saver->append(", " + std::to_string(pSum));
-		}
-	}	
-	saver->append("\n");
+		saver->append("\n");
+	}
+	
+	
+	//saver->append("\n\n");
 	
 }
 
@@ -244,12 +305,12 @@ void printTimeSince(std::chrono::time_point<std::chrono::high_resolution_clock> 
 	std::cout << convertTime(secs) << std::endl;
 }
 
-void blockProcess(std::vector<std::string> blocks,std::string * saveBlock, int nInBlock, int offset, int threadID)
+void blockProcess(std::vector<std::string> blocks,std::string * saveBlock,std::string * trueSaveBlock, int nInBlock, int offset, int threadID)
 {
 
 	for (int i = 0; i < nInBlock; ++i)
 	{
-		processLine(offset + i,blocks[i], saveBlock);
+		processLine(offset + i,blocks[i], saveBlock,trueSaveBlock);
 	}
 	
 	threadActive[threadID] = false;
@@ -297,12 +358,13 @@ int main(int argc, char** argv)
 	{
 		saveFileName = argv[2];
 	}
-	
+	std::string trueSaveFileName = "true_" + saveFileName;
 
 	
 	std::ofstream saveFile;
 	saveFile.open(saveFileName);
-	
+	std::ofstream trueSaveFile;
+	trueSaveFile.open(trueSaveFileName);
 	
 	if (argc > 3)
 	{
@@ -312,11 +374,12 @@ int main(int argc, char** argv)
 	std::vector<std::thread> persei(nThreads);
 	int currentThread = 0;
 	std::string rawLine;
-	int blockSize = 3000;
+	int blockSize = 200;
 	int currentOffset = 0;
 	bool noThreadAssigned = false;
 	std::vector<std::string> block(blockSize,"");
 	std::vector<std::string> saveBlocks(nThreads,"");
+	std::vector<std::string> trueSaveBlocks(nThreads,"");
 	int blockID = 0;
 	int count = 0;
 	while (getline(dataFile,rawLine) )
@@ -332,7 +395,9 @@ int main(int argc, char** argv)
 					{
 						persei[j].join();
 						saveFile << saveBlocks[j];
+						trueSaveFile << trueSaveBlocks[j];
 						saveBlocks[j] = "";
+						trueSaveBlocks[j] = "";
 					}
 					currentThread = j;
 					currentOffset = count;
@@ -349,7 +414,7 @@ int main(int argc, char** argv)
 		if (blockID == blockSize)
 		{
 			threadActive[currentThread] = true;
-			persei[currentThread] = std::thread(blockProcess, block,&saveBlocks[currentThread],blockID,currentOffset,currentThread);
+			persei[currentThread] = std::thread(blockProcess, block,&saveBlocks[currentThread],&trueSaveBlocks[currentThread],blockID,currentOffset,currentThread);
 			blockID = 0;
 			noThreadAssigned = true;
 			//std::cout << "Thread launched at line " << count  << "/" << totalLines << std::endl;
@@ -364,7 +429,7 @@ int main(int argc, char** argv)
 	//add the remainder in
 	if (blockID > 0)
 	{
-		persei[currentThread]= std::thread(blockProcess,block,&saveBlocks[currentThread],blockID,currentOffset,currentThread);
+		persei[currentThread]= std::thread(blockProcess,block,&saveBlocks[currentThread],&trueSaveBlocks[currentThread],blockID,currentOffset,currentThread);
 	}
 	
 	
@@ -374,12 +439,13 @@ int main(int argc, char** argv)
 		{
 			persei[j].join();
 			saveFile << saveBlocks[j];
+			trueSaveFile << trueSaveBlocks[j];
 		}
 	}
 	
-	
 	saveFile.close();
-	
+	trueSaveFile.close();
+	std::cout << "Processing complete, beginning sorting"  << std::endl;
 	std::string sortcommand = "sort " + saveFileName + "  --field-separator=',' >> sorted_" + saveFileName; 
 	system(sortcommand.c_str());
 	
